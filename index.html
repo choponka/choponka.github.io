@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Бильярд</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #1d1410; overflow: hidden; touch-action: none; font-family: system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #bar { color: #e8d9b5; font-size: 15px; padding: 6px 0; display: flex; gap: 20px; }
+  canvas { max-width: 100vw; max-height: calc(100dvh - 70px); aspect-ratio: 400 / 700; border-radius: 14px; }
+  button { background: #e8d9b5; color: #1d1410; border: 0; border-radius: 8px; padding: 6px 14px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <span>Забито: <b id="sc">0</b></span>
+  <span>Ударов: <b id="sh">0</b></span>
+  <button id="rs">Заново</button>
+</div>
+<canvas id="c" width="800" height="1400"></canvas>
+
+<script>
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+ctx.scale(2, 2);
+const W = 400, H = 700, RAIL = 24, R = 11, PR = 20;
+const pockets = [[RAIL,RAIL],[W-RAIL,RAIL],[RAIL,H/2],[W-RAIL,H/2],[RAIL,H-RAIL],[W-RAIL,H-RAIL]];
+const colors = ['#f4c430','#1e5bd8','#d62828','#6a2c91','#f77f00','#2a9d4f','#7b1e1e','#111',
+                '#f4c430','#1e5bd8','#d62828','#6a2c91','#f77f00','#2a9d4f','#7b1e1e'];
+
+let balls, cue, score, shots, aim = null, cueLost = false;
+
+function reset() {
+  balls = []; score = 0; shots = 0; cueLost = false;
+  cue = { x: W/2, y: 520, vx: 0, vy: 0, c: '#fff', cue: true };
+  balls.push(cue);
+  let i = 0;
+  for (let row = 0; row < 5; row++)
+    for (let k = 0; k <= row; k++)
+      balls.push({ x: W/2 + (k - row/2) * (R*2 + 1), y: 200 - row * (R*1.8), vx: 0, vy: 0, c: colors[i++] });
+  updateUI();
+}
+function updateUI() {
+  document.getElementById('sc').textContent = score;
+  document.getElementById('sh').textContent = shots;
+}
+const moving = () => balls.some(b => Math.hypot(b.vx, b.vy) > 0.05);
+
+function step() {
+  for (let s = 0; s < 4; s++) {
+    for (const b of balls) {
+      b.x += b.vx / 4; b.y += b.vy / 4;
+      if (b.x < RAIL + R) { b.x = RAIL + R; b.vx = Math.abs(b.vx) * 0.9; }
+      if (b.x > W - RAIL - R) { b.x = W - RAIL - R; b.vx = -Math.abs(b.vx) * 0.9; }
+      if (b.y < RAIL + R) { b.y = RAIL + R; b.vy = Math.abs(b.vy) * 0.9; }
+      if (b.y > H - RAIL - R) { b.y = H - RAIL - R; b.vy = -Math.abs(b.vy) * 0.9; }
+    }
+    for (let i = 0; i < balls.length; i++)
+      for (let j = i + 1; j < balls.length; j++) {
+        const a = balls[i], b = balls[j];
+        const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
+        if (d < R * 2 && d > 0) {
+          const nx = dx / d, ny = dy / d, o = (R * 2 - d) / 2;
+          a.x -= nx * o; a.y -= ny * o; b.x += nx * o; b.y += ny * o;
+          const p = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny;
+          if (p > 0) { a.vx -= p * nx; a.vy -= p * ny; b.vx += p * nx; b.vy += p * ny; }
+        }
+      }
+  }
+  for (const b of balls) { b.vx *= 0.985; b.vy *= 0.985; if (Math.hypot(b.vx, b.vy) < 0.05) b.vx = b.vy = 0; }
+  // лузы
+  for (let i = balls.length - 1; i >= 0; i--) {
+    const b = balls[i];
+    if (pockets.some(p => Math.hypot(b.x - p[0], b.y - p[1]) < PR)) {
+      balls.splice(i, 1);
+      if (b.cue) cueLost = true; else { score++; updateUI(); }
+    }
+  }
+  if (cueLost && !moving()) {
+    cue = { x: W/2, y: 520, vx: 0, vy: 0, c: '#fff', cue: true };
+    balls.push(cue); cueLost = false;
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#5a3320'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#17724a'; ctx.fillRect(RAIL, RAIL, W - RAIL * 2, H - RAIL * 2);
+  ctx.fillStyle = '#080808';
+  for (const p of pockets) { ctx.beginPath(); ctx.arc(p[0], p[1], PR - 2, 0, 7); ctx.fill(); }
+  for (const b of balls) {
+    ctx.beginPath(); ctx.arc(b.x, b.y, R, 0, 7); ctx.fillStyle = b.c; ctx.fill();
+    ctx.beginPath(); ctx.arc(b.x - 3, b.y - 3, 3, 0, 7); ctx.fillStyle = 'rgba(255,255,255,.35)'; ctx.fill();
+  }
+  if (aim && !moving()) {
+    const dx = aim.sx - aim.x, dy = aim.sy - aim.y, len = Math.hypot(dx, dy);
+    if (len > 3) {
+      const ux = dx / len, uy = dy / len;
+      ctx.setLineDash([6, 6]); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(cue.x, cue.y); ctx.lineTo(cue.x + ux * 220, cue.y + uy * 220); ctx.stroke();
+      ctx.setLineDash([]); ctx.strokeStyle = '#e8c27a'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+      const pull = Math.min(len, 120);
+      ctx.beginPath(); ctx.moveTo(cue.x - ux * (R + 6 + pull), cue.y - uy * (R + 6 + pull));
+      ctx.lineTo(cue.x - ux * (R + 6 + pull + 120), cue.y - uy * (R + 6 + pull + 120)); ctx.stroke();
+    }
+  }
+}
+
+function pt(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H };
+}
+cv.addEventListener('pointerdown', e => {
+  if (moving() || !balls.includes(cue)) return;
+  const p = pt(e); aim = { sx: p.x, sy: p.y, x: p.x, y: p.y };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => { if (aim) { const p = pt(e); aim.x = p.x; aim.y = p.y; } });
+cv.addEventListener('pointerup', () => {
+  if (!aim) return;
+  const dx = aim.sx - aim.x, dy = aim.sy - aim.y, len = Math.hypot(dx, dy);
+  if (len > 8) {
+    const power = Math.min(len, 120) / 120 * 22;
+    cue.vx = dx / len * power; cue.vy = dy / len * power;
+    shots++; updateUI();
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+  }
+  aim = null;
+});
+document.getElementById('rs').onclick = reset;
+
+function loop() { step(); draw(); requestAnimationFrame(loop); }
+
+reset(); loop();
+</script>
+</body>
+</html>
